@@ -101,6 +101,14 @@ class SeventeenCYPlusToyotaVehicle(ToyotaVehicle):
     async def update(self):
 
         try:
+            # Always try to get telemetry for all vehicles, even unsubscribed ones
+            try:
+                telemetry = await self._client.get_telemetry(self._vin)
+                self._parse_telemetry(telemetry)
+            except Exception as e:
+                # Log the error but continue with other updates
+                logging.error(f"Error getting telemetry: {e}")
+                
             if self._has_remote_subscription:
                 try:
                     vehicle_status = await self._client.get_vehicle_status(self._vin)
@@ -120,15 +128,8 @@ class SeventeenCYPlusToyotaVehicle(ToyotaVehicle):
                         logging.error(f"Error getting engine status: {e}")
                 except Exception as e:
                     logging.error(f"Error getting engine status: {e}")
-                
-                try:
-                    telemetry = await self._client.get_telemetry(self._vin)
-                    self._parse_telemetry(telemetry)
-                except Exception as e:
-                    # Log the error but continue with other updates
-                    logging.error(f"Error getting telemetry: {e}")
             else:
-                logging.debug(f"Vehicle {self._model_year} {self._model_name} ({self.vin}) does not have an active remote subscription. Telemetry update skipped.")
+                logging.debug(f"Vehicle {self._model_year} {self._model_name} ({self.vin}) does not have an active remote subscription. Some updates skipped.")
         except Exception as e:
             _LOGGER.error(e)
             pass
@@ -257,12 +258,24 @@ class SeventeenCYPlusToyotaVehicle(ToyotaVehicle):
 
             # last time stamp is a primitive
             if key == "lastTimestamp" and value is not None:
-                self._features[VehicleFeatures.LastTimeStamp] = ToyotaNumeric(datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp(), "")
+                # Parse the timestamp and store it as a formatted string instead of Unix timestamp
+                dt = datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+                # Convert to local time
+                local_dt = dt.astimezone()
+                # Format as a readable string
+                formatted_time = local_dt.strftime("%Y-%m-%d %H:%M:%S")
+                self._features[VehicleFeatures.LastTimeStamp] = ToyotaNumeric(formatted_time, "")
                 continue
 
             # tire pressure time stamp is a primitive
             if key == "tirePressureTimestamp" and value is not None:
-                self._features[VehicleFeatures.LastTirePressureTimeStamp] = ToyotaNumeric(datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp(), "")
+                # Parse the timestamp and store it as a formatted string instead of Unix timestamp
+                dt = datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+                # Convert to local time
+                local_dt = dt.astimezone()
+                # Format as a readable string
+                formatted_time = local_dt.strftime("%Y-%m-%d %H:%M:%S")
+                self._features[VehicleFeatures.LastTirePressureTimeStamp] = ToyotaNumeric(formatted_time, "")
                 continue
                 
             # fuel level is a primitive

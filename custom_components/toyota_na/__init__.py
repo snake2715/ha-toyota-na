@@ -186,15 +186,22 @@ async def update_vehicles_status(hass: HomeAssistant, client: ToyotaOneClient, e
     """Update vehicle status."""
     # Check if we need to refresh all vehicles
     need_refresh = False
-    need_refresh_before = datetime.utcnow().timestamp() - REFRESH_STATUS_INTERVAL
     
     # Get refresh interval from options
     refresh_interval = entry.options.get(CONF_REFRESH_STATUS_INTERVAL, REFRESH_STATUS_INTERVAL)
     need_refresh_before = datetime.utcnow().timestamp() - refresh_interval
     
-    if "last_refreshed_at" not in entry.data or entry.data["last_refreshed_at"] < need_refresh_before:
+    # Only do a full refresh if it's been longer than the refresh interval
+    # Skip the full refresh during initial startup to make it faster
+    if "last_refreshed_at" in entry.data and entry.data["last_refreshed_at"] < need_refresh_before:
         need_refresh = True
-        _LOGGER.debug(f"Full refresh needed. Last refresh: {entry.data.get('last_refreshed_at', 'never')}")
+        _LOGGER.debug(f"Full refresh needed. Last refresh: {entry.data.get('last_refreshed_at')}")
+    elif "last_refreshed_at" not in entry.data:
+        # For first run, set last_refreshed_at without doing a full refresh
+        entry_data = dict(entry.data)
+        entry_data["last_refreshed_at"] = datetime.utcnow().timestamp()
+        hass.config_entries.async_update_entry(entry, data=entry_data)
+        _LOGGER.debug("First run - setting initial refresh timestamp without full refresh")
     
     try:
         # Get vehicles with a single API call
@@ -203,6 +210,7 @@ async def update_vehicles_status(hass: HomeAssistant, client: ToyotaOneClient, e
         vehicles: list[ToyotaVehicle] = []
         
         # Process each vehicle
+        refresh_tasks = []
         for vehicle in raw_vehicles:
             # Check subscription
             if vehicle.subscribed is not True:
@@ -212,14 +220,16 @@ async def update_vehicles_status(hass: HomeAssistant, client: ToyotaOneClient, e
             
             # Only refresh subscribed vehicles when needed
             if need_refresh and vehicle.subscribed:
-                _LOGGER.debug(f"Refreshing vehicle {vehicle.vin}")
-                try:
-                    await vehicle.poll_vehicle_refresh()
-                except Exception as e:
-                    _LOGGER.warning(f"Error refreshing vehicle {vehicle.vin}: {str(e)}")
+                _LOGGER.debug(f"Queueing refresh for vehicle {vehicle.vin}")
+                refresh_tasks.append(vehicle.poll_vehicle_refresh())
             
             # Add to list
             vehicles.append(vehicle)
+        
+        # Run all refresh tasks in parallel if needed
+        if refresh_tasks:
+            _LOGGER.debug(f"Running {len(refresh_tasks)} vehicle refreshes in parallel")
+            await asyncio.gather(*refresh_tasks, return_exceptions=True)
         
         # Update last refreshed timestamp
         if need_refresh:

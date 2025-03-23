@@ -33,11 +33,13 @@ async def async_setup_entry(
             )
 
             entity_config = feature_sensor
-            # Create the sensor even if the feature is currently None
-            # This allows the sensor to become available when the data is later populated
+            
+            # Only create sensors for features that should be available for this vehicle
             if entity_config:
+                # Skip electric-only sensors for non-electric vehicles
                 if vehicle.electric is False and cast(bool, entity_config["electric"]):
                     continue
+                # Skip subscription-only sensors for non-subscribed vehicles
                 if vehicle.subscribed is False and cast(bool, entity_config["subscription"]):
                     continue
                 sensors.append(
@@ -82,16 +84,16 @@ class ToyotaNumericSensor(ToyotaNABaseEntity):
         feat = cast(ToyotaNumeric, self.feature(self._vehicle_feature))
         if feat:
             return feat.value
+        # Return None explicitly to ensure the sensor shows as "Unavailable" instead of "Unknown"
         return None
 
     @property
     def state_class(self):
-        # Return the actual state class value, not a boolean
+        # Return the actual state class
         return self._state_class
 
     @property
     def unit_of_measurement(self):
-
         # We need to poll the unit of measure from the service itself to ensure we're passing
         # the correct unit of measure to the sensor.
         if self._unit_of_measurement == "MI_OR_KM":
@@ -102,5 +104,5 @@ class ToyotaNumericSensor(ToyotaNABaseEntity):
                     return UnitOfLength.MILES
                 elif _unit == "km":
                     return UnitOfLength.KILOMETERS
-
+        
         return self._unit_of_measurement

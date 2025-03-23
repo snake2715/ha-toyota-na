@@ -274,12 +274,24 @@ class SeventeenCYToyotaVehicle(ToyotaVehicle):
             
             # last time stamp is a primitive
             if key == "lastTimestamp" and value is not None:
-                self._features[VehicleFeatures.LastTimeStamp] = ToyotaNumeric(datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp(), "")
+                # Parse the timestamp and store it as a formatted string instead of Unix timestamp
+                dt = datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+                # Convert to local time
+                local_dt = dt.astimezone()
+                # Format as a readable string
+                formatted_time = local_dt.strftime("%Y-%m-%d %H:%M:%S")
+                self._features[VehicleFeatures.LastTimeStamp] = ToyotaNumeric(formatted_time, "")
                 continue
 
             # tire pressure time stamp is a primitive
             if key == "tirePressureTimestamp" and value is not None:
-                self._features[VehicleFeatures.LastTirePressureTimeStamp] = ToyotaNumeric(datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp(), "")
+                # Parse the timestamp and store it as a formatted string instead of Unix timestamp
+                dt = datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+                # Convert to local time
+                local_dt = dt.astimezone()
+                # Format as a readable string
+                formatted_time = local_dt.strftime("%Y-%m-%d %H:%M:%S")
+                self._features[VehicleFeatures.LastTirePressureTimeStamp] = ToyotaNumeric(formatted_time, "")
                 continue
 
             # fuel level is a primitive

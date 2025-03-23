@@ -31,20 +31,9 @@ class ToyotaNABaseEntity(CoordinatorEntity[list[ToyotaVehicle]]):
     @property
     def available(self):
         """Return if entity is available."""
-        # Only mark as unavailable if coordinator has refreshed at least once
-        # and the vehicle is not found
-        if not self.coordinator.last_update_success:
-            return False
-        
-        if self.coordinator.data is None:
-            return False
-            
-        # Check if the vehicle exists in the coordinator data
-        vehicle = next((v for v in self.coordinator.data if v.vin == self.vin), None)
-        
-        # Entity is available if the vehicle exists, even if specific features are missing
-        # This allows sensors to show up in the UI and become populated when data is available
-        return vehicle is not None
+        # Only check if the vehicle exists in the coordinator data
+        # This matches the original implementation's behavior
+        return next((v for v in self.coordinator.data if v.vin == self.vin), None) is not None
 
     @property
     def name(self):
