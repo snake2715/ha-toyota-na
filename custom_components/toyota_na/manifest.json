@@ -3,10 +3,10 @@
     "domain": "toyota_na",
     "name": "Toyota (North America)",
     "config_flow": true,
-    "documentation": "https://github.com/widewing/ha_toyota_na",
-    "codeowners": ["@vanstinator, @widewing"],
+    "documentation": "https://github.com/snake2715/ha-toyota-na",
+    "codeowners": ["@snake2715", "@vanstinator", "@widewing"],
     "requirements": ["toyota-na==2.1.1"],
-    "issue_tracker": "https://github.com/widewing/ha-toyota-na/issues",
-    "version": "2.5.2",
+    "issue_tracker": "https://github.com/snake2715/ha-toyota-na/issues",
+    "version": "1.0.0",
     "iot_class": "cloud_polling"
 }
