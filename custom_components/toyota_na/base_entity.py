@@ -25,8 +25,26 @@ class ToyotaNABaseEntity(CoordinatorEntity[list[ToyotaVehicle]]):
     def feature(self, feature: VehicleFeatures):
         """Return the feature dict."""
         if self.vehicle is None:
-            return
+            return None
         return self.vehicle.features.get(feature)
+
+    @property
+    def available(self):
+        """Return if entity is available."""
+        # Only mark as unavailable if coordinator has refreshed at least once
+        # and the vehicle is not found
+        if not self.coordinator.last_update_success:
+            return False
+        
+        if self.coordinator.data is None:
+            return False
+            
+        # Check if the vehicle exists in the coordinator data
+        vehicle = next((v for v in self.coordinator.data if v.vin == self.vin), None)
+        
+        # Entity is available if the vehicle exists, even if specific features are missing
+        # This allows sensors to show up in the UI and become populated when data is available
+        return vehicle is not None
 
     @property
     def name(self):
@@ -40,13 +58,19 @@ class ToyotaNABaseEntity(CoordinatorEntity[list[ToyotaVehicle]]):
     @property
     def device_info(self) -> DeviceInfo:
         model = None
+        name = None
 
         if self.vehicle is not None:
             model = f"{self.vehicle.model_year} {self.vehicle.model_name}"
+            # Use the nickname if available, otherwise use the model information
+            if hasattr(self.vehicle, 'nickname') and self.vehicle.nickname:
+                name = self.vehicle.nickname
+            else:
+                name = model
 
         return {
             "identifiers": {(DOMAIN, self.vin)},
-            "name": model,
+            "name": name,
             "model": model,
             "manufacturer": "Toyota Motor North America",
         }
@@ -54,4 +78,6 @@ class ToyotaNABaseEntity(CoordinatorEntity[list[ToyotaVehicle]]):
     @property
     def vehicle(self) -> Union[ToyotaVehicle, None]:
         """Return the vehicle."""
+        if not self.coordinator.data:
+            return None
         return next((v for v in self.coordinator.data if v.vin == self.vin), None)

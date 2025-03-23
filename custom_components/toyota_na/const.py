@@ -2,7 +2,7 @@ from toyota_na.vehicle.base_vehicle import VehicleFeatures
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.components.sensor import SensorStateClass
-from homeassistant.const import PERCENTAGE, UnitOfPressure
+from homeassistant.const import PERCENTAGE, UnitOfPressure, CONF_USERNAME, CONF_PASSWORD
 
 from toyota_na.vehicle.base_vehicle import RemoteRequestCommand
 
@@ -17,8 +17,38 @@ HAZARDS_ON = "hazards_on"
 HAZARDS_OFF = "hazards_off"
 REFRESH = "refresh"
 
-UPDATE_INTERVAL = 30
-REFRESH_STATUS_INTERVAL = 3600
+# Default update intervals
+DEFAULT_UPDATE_INTERVAL = 300  # 5 minutes
+DEFAULT_REFRESH_STATUS_INTERVAL = 3600  # 1 hour
+
+# Current update intervals (can be changed via options flow)
+UPDATE_INTERVAL = DEFAULT_UPDATE_INTERVAL
+REFRESH_STATUS_INTERVAL = DEFAULT_REFRESH_STATUS_INTERVAL
+
+# Options
+CONF_UPDATE_INTERVAL = "update_interval"
+CONF_REFRESH_STATUS_INTERVAL = "refresh_status_interval"
+CONF_USERNAME = "username"
+CONF_PASSWORD = "password"
+
+# Update interval options (in seconds)
+UPDATE_INTERVAL_OPTIONS = {
+    60: "1 minute",
+    300: "5 minutes",
+    600: "10 minutes",
+    900: "15 minutes",
+    1800: "30 minutes",
+    3600: "1 hour"
+}
+
+# Refresh status interval options (in seconds)
+REFRESH_STATUS_INTERVAL_OPTIONS = {
+    1800: "30 minutes",
+    3600: "1 hour",
+    7200: "2 hours",
+    14400: "4 hours",
+    28800: "8 hours"
+}
 
 COMMAND_MAP = {
     DOOR_LOCK: RemoteRequestCommand.DoorLock,

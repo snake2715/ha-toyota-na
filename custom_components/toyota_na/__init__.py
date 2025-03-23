@@ -56,7 +56,9 @@ from .const import (
     DOOR_UNLOCK,
     REFRESH,
     UPDATE_INTERVAL,
-    REFRESH_STATUS_INTERVAL
+    REFRESH_STATUS_INTERVAL,
+    CONF_UPDATE_INTERVAL,
+    CONF_REFRESH_STATUS_INTERVAL
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -128,37 +130,127 @@ async def async_setup(hass: HomeAssistant, _processed_config) -> bool:
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+    """Set up Toyota NA from a config entry."""
     hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
 
+    # Use a single client instance
     client = ToyotaOneClient(
         ToyotaOneAuth(
             initial_tokens=entry.data["tokens"],
             callback=lambda tokens: update_tokens(tokens, hass, entry),
         )
     )
+    
+    # Initialize client with existing tokens
+    client.auth.set_tokens(entry.data["tokens"])
+    
+    # Try to check tokens, but don't fail if it doesn't work
     try:
-        client.auth.set_tokens(entry.data["tokens"])
         await client.auth.check_tokens()
-    except AuthError as e:
-        _LOGGER.exception(e)
-        raise ConfigEntryAuthFailed(e) from e
+    except AuthError:
+        _LOGGER.warning("Token refresh failed, attempting to re-login with username/password")
+        try:
+            await client.auth.login(entry.data["username"], entry.data["password"], None)
+        except Exception as e:
+            _LOGGER.error(f"Re-authentication failed: {str(e)}")
+            raise ConfigEntryAuthFailed("Failed to authenticate with Toyota API") from e
 
+    # Store client in hass.data
+    hass.data[DOMAIN][entry.entry_id]["toyota_na_client"] = client
+
+    # Get update interval from options or use default
+    update_interval_seconds = entry.options.get(CONF_UPDATE_INTERVAL, UPDATE_INTERVAL)
+    
+    # Create coordinator with appropriate update interval
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
         name=DOMAIN,
         update_method=lambda: update_vehicles_status(hass, client, entry),
-        update_interval=timedelta(seconds=UPDATE_INTERVAL),
+        update_interval=timedelta(seconds=update_interval_seconds),
     )
+    
+    # Store coordinator in hass.data
+    hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
+    
+    # Do first refresh
     await coordinator.async_config_entry_first_refresh()
-    hass.data[DOMAIN][entry.entry_id] = {
-        "toyota_na_client": client,
-        "coordinator": coordinator,
-    }
 
+    # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+async def update_vehicles_status(hass: HomeAssistant, client: ToyotaOneClient, entry: ConfigEntry):
+    """Update vehicle status."""
+    # Check if we need to refresh all vehicles
+    need_refresh = False
+    need_refresh_before = datetime.utcnow().timestamp() - REFRESH_STATUS_INTERVAL
+    
+    # Get refresh interval from options
+    refresh_interval = entry.options.get(CONF_REFRESH_STATUS_INTERVAL, REFRESH_STATUS_INTERVAL)
+    need_refresh_before = datetime.utcnow().timestamp() - refresh_interval
+    
+    if "last_refreshed_at" not in entry.data or entry.data["last_refreshed_at"] < need_refresh_before:
+        need_refresh = True
+        _LOGGER.debug(f"Full refresh needed. Last refresh: {entry.data.get('last_refreshed_at', 'never')}")
+    
+    try:
+        # Get vehicles with a single API call
+        _LOGGER.debug("Fetching vehicles from Toyota API")
+        raw_vehicles = await get_vehicles(client)
+        vehicles: list[ToyotaVehicle] = []
+        
+        # Process each vehicle
+        for vehicle in raw_vehicles:
+            # Check subscription
+            if vehicle.subscribed is not True:
+                _LOGGER.debug(
+                    f"Vehicle {vehicle.vin} ({vehicle.model_year} {vehicle.model_name}) needs a subscription"
+                )
+            
+            # Only refresh subscribed vehicles when needed
+            if need_refresh and vehicle.subscribed:
+                _LOGGER.debug(f"Refreshing vehicle {vehicle.vin}")
+                try:
+                    await vehicle.poll_vehicle_refresh()
+                except Exception as e:
+                    _LOGGER.warning(f"Error refreshing vehicle {vehicle.vin}: {str(e)}")
+            
+            # Add to list
+            vehicles.append(vehicle)
+        
+        # Update last refreshed timestamp
+        if need_refresh:
+            entry_data = dict(entry.data)
+            entry_data["last_refreshed_at"] = datetime.utcnow().timestamp()
+            hass.config_entries.async_update_entry(entry, data=entry_data)
+        
+        return vehicles
+        
+    except AuthError:
+        _LOGGER.warning("Authentication error during update, attempting to re-login")
+        try:
+            # Try to login again
+            await client.auth.login(entry.data["username"], entry.data["password"], None)
+            
+            # Try again after successful login
+            raw_vehicles = await get_vehicles(client)
+            vehicles: list[ToyotaVehicle] = []
+            
+            for vehicle in raw_vehicles:
+                vehicles.append(vehicle)
+                
+            return vehicles
+            
+        except Exception as e:
+            _LOGGER.error(f"Re-authentication failed during update: {str(e)}")
+            raise ConfigEntryAuthFailed("Failed to authenticate with Toyota API") from e
+            
+    except Exception as e:
+        _LOGGER.error(f"Error fetching vehicle data: {str(e)}")
+        raise UpdateFailed(f"Error updating vehicle data: {str(e)}") from e
 
 
 def update_tokens(tokens: dict[str, str], hass: HomeAssistant, entry: ConfigEntry):
@@ -166,38 +258,6 @@ def update_tokens(tokens: dict[str, str], hass: HomeAssistant, entry: ConfigEntr
     data = dict(entry.data)
     data["tokens"] = tokens
     hass.config_entries.async_update_entry(entry, data=data)
-
-
-async def update_vehicles_status(hass: HomeAssistant, client: ToyotaOneClient, entry: ConfigEntry):
-    need_refresh = False
-    need_refresh_before = datetime.utcnow().timestamp() - REFRESH_STATUS_INTERVAL
-    if "last_refreshed_at" not in entry.data or entry.data["last_refreshed_at"] < need_refresh_before:
-        need_refresh = True
-    try:
-        _LOGGER.debug("Updating vehicle status")
-        raw_vehicles = await get_vehicles(client)
-        vehicles: list[ToyotaVehicle] = []
-        for vehicle in raw_vehicles:
-            if vehicle.subscribed is not True:
-                _LOGGER.warning(
-                    f"Your {vehicle.model_year} {vehicle.model_name} needs a remote services subscription to fully work with Home Assistant."
-                )
-            if need_refresh and vehicle.subscribed:
-                await vehicle.poll_vehicle_refresh()
-            vehicles.append(vehicle)
-        entry_data = dict(entry.data)
-        entry_data["last_refreshed_at"] = datetime.utcnow().timestamp()
-        hass.config_entries.async_update_entry(entry, data=entry_data)
-        return vehicles
-    except AuthError as e:
-        try:
-            client.auth.login(entry.data["username"], entry.data["password"])
-        except LoginError:
-            _LOGGER.exception("Error logging in")
-            raise ConfigEntryAuthFailed(e) from e
-    except Exception as e:
-        _LOGGER.exception("Error fetching data")
-        raise UpdateFailed(e) from e
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):

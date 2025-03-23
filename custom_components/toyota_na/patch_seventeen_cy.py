@@ -1,5 +1,6 @@
 import datetime
 import logging
+import aiohttp
 
 from toyota_na.client import ToyotaOneClient
 from toyota_na.vehicle.base_vehicle import (
@@ -20,6 +21,7 @@ class SeventeenCYToyotaVehicle(ToyotaVehicle):
 
     _has_remote_subscription = False
     _has_electric = False
+    _nickname = None
 
     _command_map = {
         RemoteRequestCommand.DoorLock: "DL",
@@ -82,6 +84,7 @@ class SeventeenCYToyotaVehicle(ToyotaVehicle):
     ):
         self._has_remote_subscription = has_remote_subscription
         self._has_electric = has_electric
+        self._nickname = None
 
         ToyotaVehicle.__init__(
             self,
@@ -94,6 +97,16 @@ class SeventeenCYToyotaVehicle(ToyotaVehicle):
             ApiVehicleGeneration.CY17,
         )
 
+    @property
+    def nickname(self) -> str:
+        """Return the nickname of the vehicle."""
+        return self._nickname
+
+    @property
+    def has_remote_subscription(self) -> bool:
+        """Return whether the vehicle has a remote subscription."""
+        return self._has_remote_subscription
+
     async def update(self):
         
         try:
@@ -103,12 +116,14 @@ class SeventeenCYToyotaVehicle(ToyotaVehicle):
                     self._vin, self._generation.value
                 )
                 self._parse_vehicle_status(vehicle_status)
+            else:
+                logging.debug(f"Vehicle {self._model_year} {self._model_name} ({self.vin}) does not have an active remote subscription. Vehicle status update skipped.")
         except Exception as e:
             _LOGGER.error(e)
             pass
 
         try:
-            # telemetry
+            # Always try to get telemetry even without subscription
             telemetry = await self._client.get_telemetry(self._vin, self._generation.value)
             self._parse_telemetry(telemetry)
         except Exception as e:
@@ -140,13 +155,46 @@ class SeventeenCYToyotaVehicle(ToyotaVehicle):
         await self._client.send_refresh_status(self._vin, self._generation.value)
 
     async def send_command(self, command: RemoteRequestCommand) -> None:
-        """Start the engine. Periodically refreshes the vehicle status to determine if the engine is running."""
-        await self._client.remote_request(
-            self._vin,
-            self._command_map[command],
-            self._command_value_map[command],
-            self._generation.value,
-        )
+        """Send a remote command to the vehicle with robust error handling."""
+        try:
+            await self._client.remote_request(
+                self._vin,
+                self._command_map[command],
+                self._command_value_map[command],
+                self._generation.value,
+            )
+            _LOGGER.info(f"Successfully sent command {command} to vehicle {self._vin}")
+        except aiohttp.ClientResponseError as e:
+            _LOGGER.error(f"Error sending command {command} to vehicle {self._vin}: HTTP {e.status} - {e.message}")
+            if e.status == 400:
+                _LOGGER.warning(f"Bad Request (400) when sending command. This may be due to API changes, subscription limitations, or vehicle state.")
+            elif e.status == 401 or e.status == 403:
+                _LOGGER.warning(f"Authentication error ({e.status}) when sending command. Tokens may need to be refreshed.")
+                # Try to refresh tokens
+                try:
+                    # Use login instead of refresh_tokens which might be failing
+                    if hasattr(self._client.auth, 'username') and hasattr(self._client.auth, 'password'):
+                        await self._client.auth.login(self._client.auth.username, self._client.auth.password)
+                    else:
+                        await self._client.auth.refresh_tokens()
+                    _LOGGER.info("Successfully refreshed authentication tokens")
+                    # Try the command again after refreshing tokens
+                    try:
+                        await self._client.remote_request(
+                            self._vin,
+                            self._command_map[command],
+                            self._command_value_map[command],
+                            self._generation.value,
+                        )
+                        _LOGGER.info(f"Successfully sent command {command} to vehicle {self._vin} after token refresh")
+                    except Exception as retry_e:
+                        _LOGGER.error(f"Still failed to send command after token refresh: {retry_e}")
+                except Exception as auth_e:
+                    _LOGGER.error(f"Failed to refresh authentication tokens: {auth_e}")
+                    # Don't raise the exception to prevent integration disconnection
+        except Exception as e:
+            _LOGGER.error(f"Unexpected error sending command {command} to vehicle {self._vin}: {e}")
+            # Don't raise the exception to prevent integration disconnection
 
     #
     # engine_status

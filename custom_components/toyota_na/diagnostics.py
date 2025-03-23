@@ -10,6 +10,9 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from toyota_na.client import ToyotaOneClient
+import logging
+
+_LOGGER = logging.getLogger(__name__)
 
 from .const import DOMAIN
 
@@ -40,6 +43,13 @@ async def async_get_config_entry_diagnostics(
     # We don't directly expose this from the vehicle api abstraction, but it's critical to dump this in diagnostics for debugging
     user_vehicle_list = await client.get_user_vehicle_list()
     
+    # Log full vehicle data for debugging
+    _LOGGER.debug("Full vehicle list data for diagnostics:")
+    for i, vehicle in enumerate(user_vehicle_list):
+        _LOGGER.debug("Vehicle %d:", i+1)
+        for key, value in vehicle.items():
+            _LOGGER.debug("  %s: %s", key, value)
+
     vehicle_status = []
     telemetry = []
     engine_status = []
